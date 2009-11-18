@@ -1,0 +1,3 @@
+foo = test/foo1.xsl test/foo2.xsl test/foo3.xsl
+speedtest = test/1.xsl \
+            test/2.xsl

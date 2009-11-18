@@ -1,0 +1,14 @@
+OVERVIEW
+	Java library for launching stylesheets in a pipe
+
+FEATURES  
+	* caching
+	* compiling
+	* confgurable
+	* almost JAXP compliant
+  
+USAGE 
+	see org.mova.xslpipe.Piper
+  
+CONFIGURATION
+
