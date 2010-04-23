@@ -4,6 +4,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.Date;
@@ -12,6 +13,7 @@ import java.util.Map;
 import java.util.Vector;
 
 import javax.xml.transform.Source;
+import javax.xml.transform.TransformerConfigurationException;
 import javax.xml.transform.TransformerFactory;
 import javax.xml.transform.URIResolver;
 import javax.xml.transform.sax.SAXResult;
@@ -25,6 +27,9 @@ import org.apache.xml.serializer.Serializer;
 import org.apache.xml.serializer.SerializerFactory;
 import org.xml.sax.EntityResolver;
 import org.xml.sax.InputSource;
+import org.xml.sax.SAXException;
+import org.xml.sax.SAXNotRecognizedException;
+import org.xml.sax.SAXNotSupportedException;
 import org.xml.sax.XMLReader;
 import org.xml.sax.helpers.XMLReaderFactory;
 
@@ -76,7 +81,7 @@ public class Piper
 	 * 
 	 * @see Piper#getInstance()
 	 */
-	public Piper() throws PiperException, DOMUnsupportedException
+	public Piper() throws PiperException
 	{
 		
 		logger = Logger.getLogger(this.getClass());
@@ -281,31 +286,40 @@ public class Piper
 			throws PiperException
 	{		
 		Vector chain = new Vector();
-		try
-		{			
-            /* setting a custom factory URI resolver */
-            if (uriResolver != null)
-               factory.setURIResolver(uriResolver);
-			// Create an XMLReader if not created yet
-			if (reader == null)
+        /* setting a custom factory URI resolver */
+        if (uriResolver != null)
+           factory.setURIResolver(uriResolver);
+		// Create an XMLReader if not created yet
+		if (reader == null)
+			try {
 				reader = XMLReaderFactory.createXMLReader("org.apache.xerces.parsers.SAXParser");
-			if (entityResolver != null)
-				reader.setEntityResolver(entityResolver);
-			Serializer serializer = SerializerFactory
-					.getSerializer(OutputPropertiesFactory.getDefaultMethodProperties("xml"));
-			serializer.setOutputStream(output);
-			// read in xslts
-			String[] xslts;
-			xslts = pipes.getXSLsForPipe(pipename);
-			if (xslts != null && xslts.length == 0)
-				logger.warn("no XSLs for the pipe " + pipename);
-            
+			} catch (SAXException e) {
+				throw new PiperException("Could not create the " + "org.apache.xerces.parsers.SAXParser" ,e);
+			}
+		if (entityResolver != null)
+			reader.setEntityResolver(entityResolver);
+		Serializer serializer = SerializerFactory
+				.getSerializer(OutputPropertiesFactory.getDefaultMethodProperties("xml"));
+		serializer.setOutputStream(output);
+		// read in xslts
+		String[] xslts;
+		xslts = pipes.getXSLsForPipe(pipename);
+		if (xslts != null && xslts.length == 0)
+			logger.warn("no XSLs for the pipe " + pipename);
+        	
 
-            
-			for (int i = 0; i < xslts.length; i++)
-			{
-				Source source = uriResolver.resolve( piperInit.getXSLPath() + xslts[i],null);
-				TransformerHandler th = factory.newTransformerHandler(source);
+        
+		for (int i = 0; i < xslts.length; i++)
+		{
+			Source source;
+			try {
+				source = uriResolver.resolve(piperInit.getXSLPath() + xslts[i],null);
+			} catch (Exception e) {
+				throw new PiperException("Could not find the XSL file " + piperInit.getXSLPath() + xslts[i] ,e);				
+			}
+			TransformerHandler th;
+			try {
+				th = factory.newTransformerHandler(source);			
 				if (params != null)
 				{
 					/* setting XSL params*/
@@ -319,46 +333,73 @@ public class Piper
 						th.getTransformer().setURIResolver(uriResolver);
 				}
 				chain.add(th);
-			}
-			/*
-			 * assign every next filter reads from the previous one, the first reader
-			 * reads from the XMLReader
-			 */
-			Iterator it = chain.iterator();
-			if (it.hasNext()) // get first
-			{
-				TransformerHandler th = (TransformerHandler) it.next();
-				reader.setContentHandler(th);
+			} catch (TransformerConfigurationException e) {
+				throw new PiperException("Could not instantiate the TransformerHandler" ,e);				
+			}				
+		}
+		/*
+		 * assign every next filter reads from the previous one, the first reader
+		 * reads from the XMLReader
+		 */
+		Iterator it = chain.iterator();
+		if (it.hasNext()) // get first
+		{
+			TransformerHandler th = (TransformerHandler) it.next();
+			reader.setContentHandler(th);
+			try {
 				reader.setProperty("http://xml.org/sax/properties/lexical-handler", th);
-				while (it.hasNext()) // get next
-				{
-					TransformerHandler thnext = (TransformerHandler) it.next();
-					th.setResult(new SAXResult(thnext));
-					th = thnext;					
-				}
-				/* assign a content handler to the last filter in the chain */
-				th.setResult(new SAXResult(serializer.asContentHandler()));				
+			} catch (SAXNotRecognizedException e) {
+				throw new PiperException("Unknown SAXReader property " + "http://xml.org/sax/properties/lexical-handler" ,e);
+			} catch (SAXNotSupportedException e) {
+				throw new PiperException("Unsupported SAXReader property " + "http://xml.org/sax/properties/lexical-handler" ,e);			
 			}
-			else
+			while (it.hasNext()) // get next
 			{
-				TransformerHandler th = factory.newTransformerHandler();
+				TransformerHandler thnext = (TransformerHandler) it.next();
+				th.setResult(new SAXResult(thnext));
+				th = thnext;					
+			}
+			/* assign a content handler to the last filter in the chain */
+			try {
+				th.setResult(new SAXResult(serializer.asContentHandler()));
+			} catch (IllegalArgumentException e) {
+				throw new PiperException("Could not set the serializer", e);
+				} catch (IOException e) {
+					throw new PiperException(e);
+			}				
+		}
+		else {
+			TransformerHandler th;
+			try {
+				th = factory.newTransformerHandler();			
 				reader.setContentHandler(th);
 				reader.setProperty("http://xml.org/sax/properties/lexical-handler", th);
 				th.setResult(new SAXResult(serializer.asContentHandler()));
-			}
-			logger.debug("processing the pipe " + pipename + "...");
-            reader.parse(new InputSource(input));			
-			logger.debug("finished.");
-		}
-		catch (Exception tce)
-		{
-			PiperException pe = new PiperException(tce.getMessage(), tce);			
-			throw pe;
-		}
+			} catch (TransformerConfigurationException e) {
+				throw new PiperException(e);
+			} catch (SAXNotRecognizedException e) {
+				throw new PiperException(e);
+			} catch (SAXNotSupportedException e) {
+				throw new PiperException(e);
+			} catch (IllegalArgumentException e) {
+				throw new PiperException(e);
+			} catch (IOException e) {
+				throw new PiperException(e);
+			}				
+		}			
+		logger.debug("processing the pipe " + pipename + "...");
+        try {
+			reader.parse(new InputSource(input));
+		} catch (IOException e) {
+			throw new PiperException(e);
+		} catch (SAXException e) {
+			throw new PiperException(e);
+		}			
+		logger.debug("finished.");
 	}
 
 	/** This is the preferred method of accessing the Piper */
-	public static Piper getInstance() throws PiperException, DOMUnsupportedException
+	public static Piper getInstance() throws PiperException
 	{
 		if (instance == null)
 		{

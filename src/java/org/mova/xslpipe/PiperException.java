@@ -14,14 +14,16 @@ public class PiperException extends Exception
 		super(msg,ex);
 	}
 	
+	public PiperException(Throwable arg0) {
+		super(arg0);
+	}
+
 	public PiperException()
 	{
 		super();
 	}
     
-    public PiperException(Throwable ex) {
-        super(ex);
-    }
+ 
 
 	private static final long serialVersionUID = 6004415884502170384L;
 }
